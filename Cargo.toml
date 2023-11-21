@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.75"
 dotenvy = "0.15.7"
+inquire = { version = "0.6.2", features = ["chrono", "date"] }
 notion = "0.5.1"
 reqwest = { version = "0.11.22", features = ["serde_json", "json"] }
 serde = { version = "1.0.192", features = ["derive"] }
