@@ -1,6 +1,7 @@
 use eyre::{eyre, Result};
 use directories::ProjectDirs;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::fs::File;
 use std::path::PathBuf;
 
@@ -13,6 +14,25 @@ pub struct NotionSettings {
 #[derive(Debug, Deserialize)]
 pub struct Settings {
     pub notion: NotionSettings,
+    #[serde(deserialize_with = "de_map")]
+    pub map: HashMap<String, String>,
+}
+
+fn de_map<'de, D>(deserializer: D) -> Result<HashMap<String, String>, D::Error>
+where
+    D: serde::Deserializer<'de>
+{
+    let map: HashMap<String, Vec<String>> = Deserialize::deserialize(deserializer)?;
+
+    let result = map.iter().fold(HashMap::new(), |mut acc, item| {
+        item.1.iter().for_each(|name| {
+            let _ = acc.insert(name.clone().to_lowercase(), item.0.clone());
+        });
+
+        acc
+    });
+
+    Ok(result)
 }
 
 impl Settings {
@@ -32,5 +52,9 @@ impl Settings {
         }
 
         Ok(config_path)
+    }
+
+    pub fn get(&self, key: &str) -> Option<&String> {
+        self.map.get(&key.to_lowercase())
     }
 }

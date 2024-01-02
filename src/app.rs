@@ -9,7 +9,7 @@ pub struct App {
 
 fn select_page(
     pages: &Vec<notion::models::Page>,
-    preselect: Option<String>,
+    preselect: Option<&String>,
 ) -> Result<notion::ids::PageId> {
     struct Page<'a> {
         page: &'a notion::models::Page,
@@ -22,7 +22,7 @@ fn select_page(
     }
 
     let options: Vec<Page> = pages.into_iter().map(|page| Page { page }).collect();
-    let pos = preselect.and_then(|ps| options.iter().position(|p| p.to_string() == ps));
+    let pos = preselect.and_then(|ps| options.iter().position(|p| p.to_string() == ps.as_str()));
 
     let mut select = inquire::Select::new("Category:", options);
     if let Some(pos) = pos {
@@ -127,20 +127,7 @@ impl App {
                 },
             }];
 
-            preselect = match name.as_ref() {
-                "Самокат" => Some("Food".to_string()),
-                "Самокат чаевые" => Some("Food".to_string()),
-                "Метро" => Some("Transport".to_string()),
-                "Такси" => Some("Transport".to_string()),
-                "Такси чаевые" => Some("Transport".to_string()),
-                "Тренер" => Some("Fitness".to_string()),
-                "Квартира" => Some("Bills & Utilities".to_string()),
-                "Новотелеком" => Some("Bills & Utilities".to_string()),
-                "Yota" => Some("Bills & Utilities".to_string()),
-                "Квартплата" => Some("Bills & Utilities".to_string()),
-                "Колорлон" => Some("DIY".to_string()),
-                _ => None,
-            };
+            preselect = self.settings.get(name.as_ref());
 
             properties.insert(
                 "Name".to_string(),
