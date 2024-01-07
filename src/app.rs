@@ -34,6 +34,38 @@ fn select_page(
     Ok(result.page.id.clone())
 }
 
+fn page_property_to_string(page: &notion::models::Page, name: &str) -> Option<String> {
+    match page.properties.properties.get(name) {
+        Some(notion::models::properties::PropertyValue::Date { id: _, date }) => match date {
+            Some(date) => match date.start {
+                notion::models::properties::DateOrDateTime::Date(date) => Some(date.to_string()),
+                _ => None,
+            },
+            _ => None,
+        },
+        Some(notion::models::properties::PropertyValue::Number { id: _, number }) => {
+            number.clone().map(|v| v.to_string())
+        }
+        Some(_) => todo!(),
+        None => None,
+    }
+}
+
+fn database_sorting(property: impl Into<String>, page_size: u8) -> notion::models::search::DatabaseQuery {
+    notion::models::search::DatabaseQuery {
+        sorts: Some(vec![notion::models::search::DatabaseSort {
+            property: Some(property.into()),
+            timestamp: None,
+            direction: notion::models::search::SortDirection::Descending,
+        }]),
+        paging: Some(notion::models::paging::Paging {
+            start_cursor: None,
+            page_size: Some(page_size),
+        }),
+        filter: None,
+    }
+}
+
 impl App {
     pub fn new() -> Result<Self> {
         let settings = crate::settings::Settings::new()?;
@@ -54,7 +86,25 @@ impl App {
             .get_database(&app.settings.notion.database_id)
             .await?;
 
-        let confirm = inquire::Confirm::new("Want to add one more row?").with_default(false);
+        let confirm = inquire::Confirm::new("Want to add one more row?").with_default(true);
+
+        let last5 = app
+            .get_database_pages(
+                &app.settings.notion.database_id,
+                Some(database_sorting("Date", 5)),
+            )
+            .await?;
+
+        for page in last5.iter().rev() {
+            let date = page_property_to_string(&page, "Date").unwrap_or_default();
+            let amount = page_property_to_string(&page, "Amount").unwrap_or_default();
+            println!(
+                "{} {} {}",
+                date,
+                page.title().unwrap_or("Untitled".to_string()),
+                amount
+            );
+        }
 
         loop {
             app.create_page(&db).await?;
@@ -89,13 +139,11 @@ impl App {
     async fn get_database_pages(
         &self,
         database_id: &notion::ids::DatabaseId,
+        query: Option<notion::models::search::DatabaseQuery>,
     ) -> Result<Vec<notion::models::Page>> {
         let result = self
             .notion_api
-            .query_database(
-                database_id,
-                notion::models::search::DatabaseQuery::default(),
-            )
+            .query_database(database_id, query.unwrap_or_default())
             .await?;
 
         Ok(result.results)
@@ -184,7 +232,10 @@ impl App {
             db_properties.get("Category")
         {
             if self.categories_cache.is_none() {
-                self.categories_cache = self.get_database_pages(&relation.database_id).await.ok();
+                self.categories_cache = self
+                    .get_database_pages(&relation.database_id, None)
+                    .await
+                    .ok();
             }
 
             if let Some(pages) = &self.categories_cache {
