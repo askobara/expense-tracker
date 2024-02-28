@@ -5,6 +5,7 @@ pub struct App {
     settings: crate::settings::Settings,
     notion_api: notion::NotionApi,
     categories_cache: Option<Vec<notion::models::Page>>,
+    last_date: Option<notion::chrono::NaiveDate>,
 }
 
 fn select_page(
@@ -75,6 +76,7 @@ impl App {
             settings,
             notion_api,
             categories_cache: None,
+            last_date: None,
         })
     }
 
@@ -203,15 +205,15 @@ impl App {
         if let Some(notion::models::properties::PropertyConfiguration::Date { id }) =
             db_properties.get("Date")
         {
-            let now = notion::chrono::offset::Local::now();
+            let now = notion::chrono::offset::Local::now().date_naive();
+            let default_date = self.last_date.unwrap_or(now);
+
             let date = inquire::DateSelect::new("Date:")
-                .with_default(now.date_naive())
+                .with_default(default_date)
                 .with_min_date(
-                    now.checked_sub_days(notion::chrono::Days::new(7))
-                        .unwrap()
-                        .date_naive(),
+                    now.checked_sub_days(notion::chrono::Days::new(7)).unwrap(),
                 )
-                .with_max_date(now.date_naive())
+                .with_max_date(now)
                 .with_week_start(notion::chrono::Weekday::Mon)
                 .prompt()?;
 
@@ -226,6 +228,8 @@ impl App {
                     }),
                 },
             );
+
+            self.last_date = Some(date);
         }
 
         if let Some(notion::models::properties::PropertyConfiguration::Relation { id, relation }) =
