@@ -11,22 +11,31 @@ pub struct NotionSettings {
     pub database_id: notion::ids::DatabaseId,
 }
 
+#[derive(Debug, Default)]
+struct PredefinedExpenses {
+    normalized: HashMap<String, String>,
+    original: Vec<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct Settings {
     pub notion: NotionSettings,
     #[serde(deserialize_with = "de_map")]
-    pub map: HashMap<String, String>,
+    map: PredefinedExpenses,
 }
 
-fn de_map<'de, D>(deserializer: D) -> Result<HashMap<String, String>, D::Error>
+fn de_map<'de, D>(deserializer: D) -> Result<PredefinedExpenses, D::Error>
 where
     D: serde::Deserializer<'de>
 {
     let map: HashMap<String, Vec<String>> = Deserialize::deserialize(deserializer)?;
 
-    let result = map.iter().fold(HashMap::new(), |mut acc, item| {
+    let result = map.iter().fold(PredefinedExpenses::default(), |mut acc, item| {
         item.1.iter().for_each(|name| {
-            let _ = acc.insert(name.clone().to_lowercase(), item.0.clone());
+            let _ = acc.normalized.insert(name.clone().to_lowercase(), item.0.clone());
+            if !acc.original.contains(name) {
+                acc.original.push(name.to_string());
+            }
         });
 
         acc
@@ -55,6 +64,10 @@ impl Settings {
     }
 
     pub fn get(&self, key: &str) -> Option<&String> {
-        self.map.get(&key.to_lowercase())
+        self.map.normalized.get(&key.to_lowercase())
+    }
+
+    pub fn list(&self) -> Vec<&str> {
+        self.map.original.iter().map(|s| s.as_str()).collect()
     }
 }

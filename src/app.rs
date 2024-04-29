@@ -1,4 +1,5 @@
 use eyre::Result;
+use inquire::{autocompletion::Replacement, Autocomplete};
 use std::collections::HashMap;
 
 pub struct App {
@@ -52,7 +53,10 @@ fn page_property_to_string(page: &notion::models::Page, name: &str) -> Option<St
     }
 }
 
-fn database_sorting(property: impl Into<String>, page_size: u8) -> notion::models::search::DatabaseQuery {
+fn database_sorting(
+    property: impl Into<String>,
+    page_size: u8,
+) -> notion::models::search::DatabaseQuery {
     notion::models::search::DatabaseQuery {
         sorts: Some(vec![notion::models::search::DatabaseSort {
             property: Some(property.into()),
@@ -64,6 +68,76 @@ fn database_sorting(property: impl Into<String>, page_size: u8) -> notion::model
             page_size: Some(page_size),
         }),
         filter: None,
+    }
+}
+
+#[derive(Clone)]
+struct TitleCompleter {
+    input: String,
+    prev_titles: Vec<String>,
+    output: Vec<String>,
+}
+
+impl TitleCompleter {
+    fn new(titles: Vec<&str>) -> Self {
+        Self {
+            prev_titles: titles.into_iter().map(|t| t.to_owned()).collect(),
+            ..Default::default()
+        }
+    }
+
+    fn update_input(&mut self, input: &str) -> Result<(), inquire::CustomUserError> {
+        if self.input == input {
+            return Ok(());
+        }
+
+        self.input = input.to_owned();
+        self.output.clear();
+
+        for item in &self.prev_titles {
+            if item.starts_with(input) {
+                self.output.push(item.to_string());
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl Default for TitleCompleter {
+    fn default() -> Self {
+        Self {
+            input: "".to_string(),
+            output: vec![],
+            prev_titles: vec![],
+        }
+    }
+}
+
+impl Autocomplete for TitleCompleter {
+    fn get_suggestions(&mut self, input: &str) -> Result<Vec<String>, inquire::CustomUserError> {
+        self.update_input(input)?;
+
+        Ok(self.output.clone())
+    }
+
+    fn get_completion(
+        &mut self,
+        input: &str,
+        highlighted_suggestion: Option<String>,
+    ) -> Result<Replacement, inquire::CustomUserError> {
+        self.update_input(input)?;
+
+        Ok(match highlighted_suggestion {
+            Some(suggestion) => Replacement::Some(suggestion),
+            None => {
+                if self.output.len() == 1 {
+                    Replacement::Some(self.output[0].clone())
+                } else {
+                    Replacement::None
+                }
+            }
+        })
     }
 }
 
@@ -163,7 +237,9 @@ impl App {
         if let Some(notion::models::properties::PropertyConfiguration::Title { id }) =
             db_properties.get("Name")
         {
-            let name = inquire::Text::new("Name:").prompt()?;
+            let name = inquire::Text::new("Name:")
+                .with_autocomplete(TitleCompleter::new(self.settings.list()))
+                .prompt()?;
 
             let title = vec![notion::models::text::RichText::Text {
                 rich_text: notion::models::text::RichTextCommon {
@@ -210,9 +286,7 @@ impl App {
 
             let date = inquire::DateSelect::new("Date:")
                 .with_default(default_date)
-                .with_min_date(
-                    now.checked_sub_days(notion::chrono::Days::new(7)).unwrap(),
-                )
+                .with_min_date(now.checked_sub_days(notion::chrono::Days::new(7)).unwrap())
                 .with_max_date(now)
                 .with_week_start(notion::chrono::Weekday::Mon)
                 .prompt()?;
