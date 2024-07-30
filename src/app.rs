@@ -141,6 +141,92 @@ impl Autocomplete for TitleCompleter {
     }
 }
 
+#[derive(Debug)]
+enum Operator {
+    Add,
+    Sub,
+    Mul,
+    Div,
+}
+
+impl Operator {
+    fn from(c: &char) -> Option<Self> {
+        match c {
+            '+' => Some(Self::Add),
+            '-' => Some(Self::Sub),
+            '*' => Some(Self::Mul),
+            '/' => Some(Self::Div),
+            _ => None,
+        }
+    }
+}
+
+fn calc(expresion: &str) -> Result<f64> {
+    let mut op: Option<Operator> = None;
+    let mut pos: Option<usize> = None;
+    let mut stack: Vec<&str> = Vec::new();
+
+    for (i, c) in expresion.char_indices() {
+        if char::is_digit(c, 10) && pos.is_none() {
+            pos.replace(i);
+        } else if !char::is_digit(c, 10) && !matches!(c, ','|'.') && pos.is_some() {
+            stack.push(&expresion[pos.take().unwrap()..i]);
+            op = Operator::from(&c);
+        }
+    }
+
+    if pos.is_some() {
+        stack.push(&expresion[pos.take().unwrap()..]);
+    }
+
+    if op.is_some() && stack.len() == 2 {
+        let lhs: f64 = stack.remove(1).parse()?;
+        let rhs: f64 = stack.remove(0).parse()?;
+
+        let result = match op.take().unwrap() {
+            Operator::Add => lhs + rhs,
+            Operator::Sub => lhs - rhs,
+            Operator::Mul => lhs * rhs,
+            Operator::Div => lhs / rhs,
+        };
+
+        return Ok(result);
+    } else if op.is_none() && stack.len() == 1 {
+        let rhs = stack.remove(0).parse::<f64>();
+
+        return rhs.map_err(eyre::Error::new);
+    }
+
+    Err(eyre::Error::msg("Not expeceted"))
+}
+
+#[test]
+fn calc_test() {
+    let result = calc("10+10").unwrap();
+    assert_eq!(result, 20.0);
+
+    // let result = calc("10+10+10").unwrap();
+    // assert_eq!(result, 30.0);
+
+    let result = calc("10").unwrap();
+    assert_eq!(result, 10.0);
+
+    let result = calc("10.1").unwrap();
+    assert_eq!(result, 10.1);
+
+    // let result = calc("10+(10*3)").unwrap();
+    // assert_eq!(result, 40.0);
+
+    let result = calc("10-10").unwrap();
+    assert_eq!(result, 0.0);
+
+    let result = calc("10*10").unwrap();
+    assert_eq!(result, 100.0);
+
+    let result = calc("10/10").unwrap();
+    assert_eq!(result, 1.0);
+}
+
 impl App {
     pub fn new() -> Result<Self> {
         let settings = crate::settings::Settings::new()?;
@@ -268,12 +354,13 @@ impl App {
             db_properties.get("Amount")
         {
             let amount = inquire::Text::new("Amount:").prompt()?;
+            let amount = calc(&amount)?;
 
             properties.insert(
                 "Amount".to_string(),
                 notion::models::properties::PropertyValue::Number {
                     id: id.clone(),
-                    number: serde_json::Number::from_f64(amount.parse::<f64>()?),
+                    number: serde_json::Number::from_f64(amount),
                 },
             );
         }
@@ -286,7 +373,7 @@ impl App {
 
             let date = inquire::DateSelect::new("Date:")
                 .with_default(default_date)
-                .with_min_date(now.checked_sub_days(notion::chrono::Days::new(7)).unwrap())
+                .with_min_date(now.checked_sub_days(notion::chrono::Days::new(30)).unwrap())
                 .with_max_date(now)
                 .with_week_start(notion::chrono::Weekday::Mon)
                 .prompt()?;
