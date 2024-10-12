@@ -164,24 +164,43 @@ impl Operator {
 fn calc(expresion: &str) -> Result<f64> {
     let mut op: Option<Operator> = None;
     let mut pos: Option<usize> = None;
-    let mut stack: Vec<&str> = Vec::new();
+    let mut stack: Vec<f64> = Vec::new();
 
     for (i, c) in expresion.char_indices() {
         if char::is_digit(c, 10) && pos.is_none() {
             pos.replace(i);
-        } else if !char::is_digit(c, 10) && !matches!(c, ','|'.') && pos.is_some() {
-            stack.push(&expresion[pos.take().unwrap()..i]);
+        } else if !char::is_digit(c, 10) && !matches!(c, ','|'.') {
+            if pos.is_some() {
+                let v = expresion[pos.take().unwrap()..i].parse()?;
+                stack.push(v);
+
+                if op.is_some() && stack.len() == 2 {
+                    let rhs: f64 = stack.remove(1);
+                    let lhs: f64 = stack.remove(0);
+
+                    let result = match op.take().unwrap() {
+                        Operator::Add => lhs + rhs,
+                        Operator::Sub => lhs - rhs,
+                        Operator::Mul => lhs * rhs,
+                        Operator::Div => lhs / rhs,
+                    };
+
+                    stack.push(result);
+                }
+            }
             op = Operator::from(&c);
         }
+
     }
 
     if pos.is_some() {
-        stack.push(&expresion[pos.take().unwrap()..]);
+        let v = expresion[pos.take().unwrap()..].parse()?;
+        stack.push(v);
     }
 
     if op.is_some() && stack.len() == 2 {
-        let lhs: f64 = stack.remove(1).parse()?;
-        let rhs: f64 = stack.remove(0).parse()?;
+        let rhs: f64 = stack.remove(1);
+        let lhs: f64 = stack.remove(0);
 
         let result = match op.take().unwrap() {
             Operator::Add => lhs + rhs,
@@ -192,9 +211,7 @@ fn calc(expresion: &str) -> Result<f64> {
 
         return Ok(result);
     } else if op.is_none() && stack.len() == 1 {
-        let rhs = stack.remove(0).parse::<f64>();
-
-        return rhs.map_err(eyre::Error::new);
+        return Ok(stack.remove(0));
     }
 
     Err(eyre::Error::msg("Not expeceted"))
@@ -205,8 +222,23 @@ fn calc_test() {
     let result = calc("10+10").unwrap();
     assert_eq!(result, 20.0);
 
-    // let result = calc("10+10+10").unwrap();
-    // assert_eq!(result, 30.0);
+    let result = calc("10+10+10").unwrap();
+    assert_eq!(result, 30.0);
+
+    let result = calc("10+10.1+10").unwrap();
+    assert_eq!(result, 30.1);
+
+    let result = calc("10+10+10-30").unwrap();
+    assert_eq!(result, 0.0);
+
+    let result = calc("10-30+10+10+3").unwrap();
+    assert_eq!(result, 3.0);
+
+    let result = calc("10/2").unwrap();
+    assert_eq!(result, 5.0);
+
+    let result = calc("10*2").unwrap();
+    assert_eq!(result, 20.0);
 
     let result = calc("10").unwrap();
     assert_eq!(result, 10.0);
