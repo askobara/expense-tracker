@@ -1,5 +1,5 @@
 use eyre::Result;
-use inquire::{autocompletion::Replacement, Autocomplete};
+use inquire::{Autocomplete, autocompletion::Replacement, required, validator::Validation};
 use std::collections::HashMap;
 
 pub struct App {
@@ -7,6 +7,7 @@ pub struct App {
     notion_api: notion::NotionApi,
     categories_cache: Option<Vec<notion::models::Page>>,
     last_date: Option<notion::chrono::NaiveDate>,
+    last_amount: HashMap<String, f64>,
 }
 
 fn select_page(
@@ -169,7 +170,7 @@ fn calc(expresion: &str) -> Result<f64> {
     for (i, c) in expresion.char_indices() {
         if char::is_digit(c, 10) && pos.is_none() {
             pos.replace(i);
-        } else if !char::is_digit(c, 10) && !matches!(c, ','|'.') {
+        } else if !char::is_digit(c, 10) && !matches!(c, ',' | '.') {
             if pos.is_some() {
                 let v = expresion[pos.take().unwrap()..i].parse()?;
                 stack.push(v);
@@ -190,7 +191,6 @@ fn calc(expresion: &str) -> Result<f64> {
             }
             op = Operator::from(&c);
         }
-
     }
 
     if pos.is_some() {
@@ -269,6 +269,7 @@ impl App {
             notion_api,
             categories_cache: None,
             last_date: None,
+            last_amount: HashMap::new(),
         })
     }
 
@@ -322,6 +323,7 @@ impl App {
                 database_id: db.id.clone(),
             },
             properties: notion::models::Properties { properties },
+            children: None,
         };
 
         self.notion_api
@@ -350,15 +352,14 @@ impl App {
         let mut properties: HashMap<String, notion::models::properties::PropertyValue> =
             HashMap::new();
 
-        let mut preselect = None;
+        let name = inquire::Text::new("Name:")
+            .with_autocomplete(TitleCompleter::new(self.settings.list()))
+            .with_validator(required!("Name is required"))
+            .prompt()?;
 
         if let Some(notion::models::properties::PropertyConfiguration::Title { id }) =
             db_properties.get("Name")
         {
-            let name = inquire::Text::new("Name:")
-                .with_autocomplete(TitleCompleter::new(self.settings.list()))
-                .prompt()?;
-
             let title = vec![notion::models::text::RichText::Text {
                 rich_text: notion::models::text::RichTextCommon {
                     plain_text: name.clone(),
@@ -370,8 +371,6 @@ impl App {
                     link: None,
                 },
             }];
-
-            preselect = self.settings.get(name.as_ref());
 
             properties.insert(
                 "Name".to_string(),
@@ -385,8 +384,32 @@ impl App {
         if let Some(notion::models::properties::PropertyConfiguration::Number { id, .. }) =
             db_properties.get("Amount")
         {
-            let amount = inquire::Text::new("Amount:").prompt()?;
+            let last_amount = self.last_amount.get(&name).map(|v| v.to_string());
+
+            let validator = |input: &str| match calc(input) {
+                Ok(_) => Ok(Validation::Valid),
+                Err(_) => Ok(Validation::Invalid("Not valid expression".into())),
+            };
+
+            let amount = inquire::Text {
+                message: "Amount:",
+                initial_value: None,
+                default: last_amount.as_deref(),
+                placeholder: None,
+                help_message: None,
+                formatter: inquire::Text::DEFAULT_FORMATTER,
+                validators: Vec::new(),
+                page_size: inquire::Text::DEFAULT_PAGE_SIZE,
+                autocompleter: None,
+                render_config: inquire::ui::RenderConfig::default(),
+            }
+            .with_validator(required!("Amount is required"))
+            .with_validator(validator)
+            .prompt()?;
+
             let amount = calc(&amount)?;
+
+            self.last_amount.insert(name.clone(), amount);
 
             properties.insert(
                 "Amount".to_string(),
@@ -405,7 +428,7 @@ impl App {
 
             let date = inquire::DateSelect::new("Date:")
                 .with_default(default_date)
-                .with_min_date(now.checked_sub_days(notion::chrono::Days::new(30)).unwrap())
+                .with_min_date(now.checked_sub_days(notion::chrono::Days::new(90)).unwrap())
                 .with_max_date(now)
                 .with_week_start(notion::chrono::Weekday::Mon)
                 .prompt()?;
@@ -435,8 +458,10 @@ impl App {
                     .ok();
             }
 
+            let preselected_category = self.settings.get(&name);
+
             if let Some(pages) = &self.categories_cache {
-                let page_id = select_page(&pages, preselect)?;
+                let page_id = select_page(&pages, preselected_category)?;
 
                 properties.insert(
                     "Category".to_string(),
